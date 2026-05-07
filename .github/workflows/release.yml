@@ -1,0 +1,80 @@
+name: Update Cursor AUR
+
+on:
+  workflow_dispatch:
+
+  schedule:
+    - cron: '0 */6 * * *'
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            curl \
+            wget \
+            git \
+            desktop-file-utils
+
+      - name: Install makepkg
+        run: |
+          git clone https://gitlab.archlinux.org/pacman/pacman.git
+          cd pacman
+          ./autogen.sh || true
+
+      - name: Install devtools
+        run: |
+          sudo apt install -y fakeroot
+
+      - name: Install makepkg minimal
+        run: |
+          sudo wget -O /usr/local/bin/makepkg \
+            https://raw.githubusercontent.com/archlinux/svntogit-packages/packages/pacman/trunk/scripts/makepkg.sh
+
+          sudo chmod +x /usr/local/bin/makepkg
+
+      - name: Run updater
+        run: bash update.sh
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.AUR_SSH_PRIVATE_KEY }}" > ~/.ssh/aur
+          chmod 600 ~/.ssh/aur
+
+          cat >> ~/.ssh/config <<EOF
+Host aur.archlinux.org
+    IdentityFile ~/.ssh/aur
+    StrictHostKeyChecking no
+EOF
+
+      - name: Push to AUR
+        run: |
+          git clone ssh://aur@aur.archlinux.org/cursor-appimage-bin.git aur
+
+          cp PKGBUILD .SRCINFO aur/
+
+          cd aur
+
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+
+          git add .
+
+          if git diff --cached --quiet; then
+            echo "AUR 无更新"
+            exit 0
+          fi
+
+          git commit -m "update"
+
+          git push
